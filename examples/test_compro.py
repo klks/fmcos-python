@@ -1,7 +1,12 @@
+"""Scripted scenario from FM1208_Test_compro-v2.html reference.
+
+Automates creation of key/file structures, PIN verify, encrypted file write,
+record append/read, ADF creation, and wallet operations. Run then type 'setup'.
+"""
 import sys
 import os
 import traceback
-from Crypto.Cipher import DES
+from Crypto.Cipher import DES  # type: ignore
 from conn_pn532 import BRIDGE_PN532
 from conn_pyscard import BRIDGE_PYSCARD
 from fmcos import CPUFileType, KeyType, BalanceType, Protection, parse_return_code, FMCOS
@@ -9,7 +14,7 @@ from utils import bytes_to_hexstr, assert_success
 
 # optional color support .. `pip install ansicolors`
 try:
-    from colors import color
+    from colors import color  # type: ignore
 except ModuleNotFoundError:
     def color(s, fg=None):
         _ = fg
@@ -33,7 +38,7 @@ if __name__ == '__main__':
 
     hw_conn = BRIDGE_PN532(com_port="COM11", hw_debug=DEBUG_PN532)    
     exam = FMCOS(hw_conn=hw_conn, fmcos_debug=DEBUG_FMCOS)
-    while (1):
+    while True:
         inp = input("> ")
 
         if len(inp) == 0:

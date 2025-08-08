@@ -1,7 +1,12 @@
+"""MAC helper test vectors for DES/3DES MAC routines in FMCOS.
+
+Executes fmcos_3des_mac on known inputs and asserts expected 4-byte outputs.
+Does not require a physical card; uses a dummy hw_conn object.
+"""
 import sys
 import os
 import traceback
-from Crypto.Cipher import DES
+from Crypto.Cipher import DES  # type: ignore
 from fmcos import CPUFileType, KeyType, BalanceType, parse_return_code, FMCOS
 from utils import bytes_to_hexstr, assert_success
 
@@ -9,7 +14,11 @@ DEBUG_FMCOS = True
 DEBUG_PN532 = False
 
 if __name__ == '__main__':
-    exam = FMCOS(DEBUG_FMCOS, DEBUG_PN532)
+    class _Dummy:
+        def nfcFindCard(self): return None
+        def nfcGetRecData(self): return b"\x90\x00"
+        def sendToNfc(self, *_a, **_k): pass
+    exam = FMCOS(hw_conn=_Dummy(), fmcos_debug=DEBUG_FMCOS)
 
     key_all_ffs = b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 

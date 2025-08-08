@@ -1,7 +1,13 @@
+"""Comprehensive file/record/loop protection demo for FMCOS.
+
+Shows creation of various file types (binary, variable, loop) with optional
+line protection (MAC only or MAC+encryption), plus block/unblock flows.
+Interactive: run and type commands like setup, write_binary, read_record, etc.
+"""
 import sys
 import os
 import traceback
-from Crypto.Cipher import DES
+from Crypto.Cipher import DES  # type: ignore
 from conn_pn532 import BRIDGE_PN532
 from conn_pyscard import BRIDGE_PYSCARD
 from fmcos import CPUFileType, KeyType, BalanceType, Protection, ApplicationBlock
@@ -10,7 +16,7 @@ from utils import bytes_to_hexstr, assert_success, assert_failure
 
 # optional color support .. `pip install ansicolors`
 try:
-    from colors import color
+    from colors import color  # type: ignore
 except ModuleNotFoundError:
     def color(s, fg=None):
         _ = fg

@@ -1,7 +1,18 @@
+"""Interactive FMCOS playground (pyscard / PN532).
+
+Enter commands like:
+    select 3f00      -> SELECT MF
+    external_auth    -> External authenticate with default key
+    reset            -> Erase DF (requires auth if protected)
+    size_test        -> Probe max file allocations
+    example_1..3[a]  -> Run scripted scenarios from public references
+
+Educational script: logic kept verbose for clarity.
+"""
 import sys
 import os
 import traceback
-from Crypto.Cipher import DES
+from Crypto.Cipher import DES  # type: ignore
 from conn_pn532 import BRIDGE_PN532
 from conn_pyscard import BRIDGE_PYSCARD
 from fmcos import CPUFileType, KeyType, BalanceType, Protection, parse_return_code, FMCOS
@@ -9,7 +20,7 @@ from utils import bytes_to_hexstr, assert_success
 
 # optional color support .. `pip install ansicolors`
 try:
-    from colors import color
+    from colors import color  # type: ignore
 except ModuleNotFoundError:
     def color(s, fg=None):
         _ = fg
@@ -27,7 +38,7 @@ if __name__ == '__main__':
     #pn532_conn = BRIDGE_PN532(com_port="COM11", hw_debug=DEBUG_PN532)
     hw_conn = BRIDGE_PYSCARD(reader_string="ACS ACR1581 1S Dual Reader PICC 0", hw_debug=DEBUG_ACR1518)
     exam = FMCOS(hw_conn=hw_conn, fmcos_debug=DEBUG_FMCOS)
-    while (1):
+    while True:  # REPL loop
         inp = input("> ")
 
         if len(inp) == 0:
@@ -562,7 +573,8 @@ if __name__ == '__main__':
                 ret = exam.cmd_get_balance(balance_type=BalanceType.Wallet)
                 assert_success(exam, ret)
 
-                ret = exam.cmd_purchase_wallet(bkey_id=2, amount=0x500, terminal_id=terminal_id, purchase_key=purchase_key_2, internal_key=internal_key)
+                #Spend more money
+                ret = exam.cmd_purchase_wallet(key_id=2, amount=0x500, terminal_id=terminal_id, purchase_key=purchase_key_2, internal_key=internal_key)
                 assert_success(exam, ret)
 
                 #Check balance

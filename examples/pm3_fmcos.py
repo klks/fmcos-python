@@ -1,11 +1,19 @@
+"""Proxmark3 FMCOS demo script.
+
+- Place this file in your Proxmark3 `pyscripts` directory.
+- Update the sys.path line below to point to your local fmcos-python repo.
+- Provides simple CLI subcommands to setup a test wallet, add/spend money, etc.
+
+This script uses the BRIDGE_PM3 transport to send FMCOS APDUs via pm3 console.
+"""
 #Place this file in your proxmarks pyscripts directory
 import sys
 import os
 import argparse
-import pm3
+import pm3  # type: ignore  # Optional Proxmark3 Python module
 import struct
 
-sys.path.append("D:\\LocalDev\\fmcos-python")   #Change this to fit
+sys.path.append("D:\\LocalDev\\fmcos-python")   # TODO: change to your local path
 from conn_pm3 import BRIDGE_PM3
 from fmcos import CPUFileType, KeyType, BalanceType, Protection, parse_return_code, FMCOS
 from utils import bytes_to_hexstr, assert_success
@@ -21,13 +29,14 @@ fmcos_conn = None
 
 # optional color support .. `pip install ansicolors`
 try:
-    from colors import color
+    from colors import color  # type: ignore
 except ModuleNotFoundError:
     def color(s, fg=None):
         _ = fg
         return str(s)
     
 def waitForCard(max_tries=5):
+    """Poll for a card up to max_tries. Return True if found, else False."""
     global pm3_conn, fmcos_conn
 
     tries = 0
@@ -41,7 +50,7 @@ def waitForCard(max_tries=5):
     return True
 
 def parseCli():
-    """Parse the CLi arguments"""
+    """Parse CLI arguments for the demo commands."""
     parser = argparse.ArgumentParser(description='FMCOS example script', exit_on_error=False)
     subparsers = parser.add_subparsers(title="Commands", dest="command", required=True)
 
@@ -60,6 +69,7 @@ def parseCli():
     return args
 
 def select_wallet():
+    """Convenience: select the example wallet DF by name."""
     global pm3_conn, fmcos_conn
 
     #Select by id or name
@@ -70,13 +80,15 @@ def select_wallet():
     assert_success(fmcos_conn, ret)
 
 def main():
+    """Entry point for the interactive pm3 FMCOS demo."""
     global pm3_conn, fmcos_conn
 
-    p = pm3.pm3()  # console interface
+    p = pm3.pm3()  # pm3 console interface
 
     args = parseCli()
     if args == None: return
 
+    # Wire the hardware bridge (pm3) to FMCOS high-level API
     pm3_conn = BRIDGE_PM3(pm3_debug=DEBUG_PM3, pm3=p)
     fmcos_conn = FMCOS(hw_conn=pm3_conn, fmcos_debug=DEBUG_FMCOS)
 
@@ -86,7 +98,7 @@ def main():
     pin_code = b"\x12\x34\x5F\xFF\xFF\xFF\xFF\xFF"
     terminal_id = b"\x66\x66\x66\x66\x66\x66"
 
-    #print(args)
+    # Dispatch subcommands
     match args.command:
         case 'select':
             if not waitForCard():
