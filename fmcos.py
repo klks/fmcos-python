@@ -3,72 +3,74 @@ import os
 import struct
 import datetime
 from enum import IntEnum
-from utils import strToint16, bytes_to_hexstr
-from Crypto.Cipher import DES, DES3  # type: ignore
-from Crypto.Util.Padding import pad, unpad  # type: ignore
+from fmcos_utils import bytes_to_hexstr, strToint16
 
-# Optional color support .. `pip install ansicolors`
+#install with `pip install pycryptodome`
+from Crypto.Cipher import DES, DES3
+from Crypto.Util.Padding import pad, unpad
+
+#install with `pip install colorama`
 try:
-    from colors import color  # type: ignore
+    from colors import color
 except ModuleNotFoundError:
     def color(s, fg=None):
         _ = fg
         return str(s)
 
 class ApplicationBlock(IntEnum):
-    Temporary = 0x00,
+    Temporary = 0x00
     Permenant = 0x01
 
+
 class Protection(IntEnum):
-    LineProtect = 0x80,
+    LineProtect = 0x80
     LineProtectEncrypt = 0xC0
 
+
 class BalanceType(IntEnum):
-    Passbook = 0x01,
+    Passbook = 0x01
     Wallet = 0x02
 
+
 class TransactionProofType(IntEnum):
-    Passbook = 0x01,
-    Wallet = 0x02,
-    Debit = 0x03,
-    Withdrawals = 0x04,
-    PassbookPurchase = 0x05,
-    WalletPurchase = 0x06,
-    Overdraft = 0x07,
+    Passbook = 0x01
+    Wallet = 0x02
+    Debit = 0x03
+    Withdrawals = 0x04
+    PassbookPurchase = 0x05
+    WalletPurchase = 0x06
+    Overdraft = 0x07
     Compound = 0x09
 
+
 class CPUFileType(IntEnum):
-    MFDF = 0x38,    #Catalog file MF or DF
-    BinFile = 0x28,
-    FixLength = 0x2A,
-    VariableLength = 0x2C,
-    LoopFile = 0x2E,
-    Wallet = 0x2F,
-    Keyfile = 0x3f,
+    MFDF = 0x38    #Catalog file MF or DF
+    BinFile = 0x28
+    FixLength = 0x2A
+    VariableLength = 0x2C
+    LoopFile = 0x2E
+    Wallet = 0x2F
+    Keyfile = 0x3F
+
 
 class KeyType(IntEnum):
-    DESEncrypt = 0x30,
-    DESDecrypt = 0x31,
-    DESMAC = 0x32,
-    InternalKey = 0x34,
-    FileLineProtectionKey = 0x36,
-    UnlockPinKey = 0x37,                    #Also called Unlock Password Key
-    ChangePinKey = 0x38,                    #Also called Reload/Reinstall Password Key
-    ExternalAuthenticationKey = 0x39,
-    PinKey = 0x3a,                          #Also called Password Key
-    OverdrawLimitKey = 0x3c,                #Also called Modify Overdraft Limit Key
-    DebitKey = 0x3d,                        #Also called Circle/Withdrawal Key
-    PurchaseKey = 0x3e,                     #Also called Consumption Key
-    CreditKey = 0x3f                        #Also called Captive/Trap/Stored/Recharge Key
+    DESEncrypt = 0x30
+    DESDecrypt = 0x31
+    DESMAC = 0x32
+    InternalKey = 0x34
+    FileLineProtectionKey = 0x36
+    UnlockPinKey = 0x37                    #Also called Unlock Password Key
+    ChangePinKey = 0x38                    #Also called Reload/Reinstall Password Key
+    ExternalAuthenticationKey = 0x39
+    PinKey = 0x3A                          #Also called Password Key
+    OverdrawLimitKey = 0x3C                #Also called Modify Overdraft Limit Key
+    DebitKey = 0x3D                        #Also called Circle/Withdrawal Key
+    PurchaseKey = 0x3E                     #Also called Consumption Key
+    CreditKey = 0x3F                        #Also called Captive/Trap/Stored/Recharge Key
+
 
 def parse_return_code(ret_code, console_print=True):
-    """Decode SW1/SW2 or extended status words into a readable message.
-
-    Args:
-        ret_code (bytes): Buffer ending in SW1 SW2.
-        console_print (bool): If True, print a human-readable summary.
-    """
-    if ret_code == None:
+    if ret_code is None:
         if console_print:
             print("Return code empty")
         return
@@ -204,11 +206,6 @@ def parse_return_code(ret_code, console_print=True):
     return ret_string
 
 def TLVanalysis(TLV, tagLen=1):
-    """Parse a simple TLV structure into a dict.
-
-    Expects 1-byte tag by default; set tagLen=2 for 2-byte tags.
-    Returns dict mapping tag bytes -> value bytes, or 'error' on failure.
-    """
     sum = 0
     TLVdict = {}
     while (1):
@@ -230,17 +227,18 @@ def TLVanalysis(TLV, tagLen=1):
     return TLVdict
     
 def TLVcreate(tag, value):
-    """Create TLV bytes (1-byte length) from tag and value."""
     len = len(value)
     TLVdata = tag + bytes([len]) + value
     return TLVdata
 
-class FMCOS():
-    """High-level FMCOS card API with MAC/encryption support and helpers.
 
-    Wraps a hardware connection (PM3, PN532, pyscard) to send APDUs and
-    provides helpers for TLV parsing, MACing, and various FMCOS commands.
-    """
+def as_byte(value):
+    int_value = int(value)
+    if not 0 <= int_value <= 0xFF:
+        raise ValueError(f"Value {int_value} out of range for a single byte")
+    return int_value.to_bytes(1, "big")
+
+class FMCOS():
     def __init__(self, hw_conn, fmcos_debug):
         self.hw_conn = hw_conn
         self.simulation_status = False
@@ -256,27 +254,21 @@ class FMCOS():
         self.simulation_status = enabled
 
     def is_success(self, ret_code):
-        """Return True if response ends with SW=0x9000."""
         if ret_code[-2:] != b"\x90\x00":
             return False
         return True
 
     def data_xor(self, src, dst):
-        """XOR two 8-byte blocks and return the result."""
+        if len(src) < 8 or len(dst) < 8:
+            raise ValueError("data_xor requires buffers of at least 8 bytes")
+
         out_buf = b""
         for i in range(8):
-            out_buf += (src[i] ^ dst[i]).to_bytes()
+            out_buf += bytes([src[i] ^ dst[i]])
         return out_buf
 
     #https://github.com/Legrandin/pycryptodome/issues/297#issuecomment-500383674
     def make_cipher(self, key):
-        """Return DES/3DES ECB cipher matching key size and duplication rules.
-
-    Key interpretation:
-    - 8 bytes -> DES
-    - 16 bytes -> if halves equal, DES; else 2-key 3DES
-    - 24 bytes -> reduce to DES or 2-key 3DES when halves repeat, else 3DES
-        """
         cipher = None
         if len(key) == 8:
             cipher = DES.new(key, DES.MODE_ECB)
@@ -297,19 +289,16 @@ class FMCOS():
         return cipher
 
     def encrypt(self, data, key):
-        """ISO7816-pad and encrypt with the cipher returned by make_cipher."""
         cipher = self.make_cipher(key)
         new_buf = pad(data, cipher.block_size, style='iso7816')
         return cipher.encrypt(new_buf)
 
     def decrypt(self, data, key):
-        """Decrypt and unpad with ISO7816 style."""
         cipher = self.make_cipher(key)
         new_buf = cipher.decrypt(data)
         return unpad(new_buf, cipher.block_size, style='iso7816')
 
     def fmcos_des_mac(self, buf, key, iv=b"\x00\x00\x00\x00\x00\x00\x00\x00", ret_cnt=4):
-        """Compute single-DES CBC-MAC over ISO7816-padded data; return first ret_cnt bytes."""
         new_buf = pad(buf, DES.block_size, style='iso7816')
         x = len(new_buf) // 8
         val = iv
@@ -318,37 +307,40 @@ class FMCOS():
         for i in range(x):
             xor_data = self.data_xor(val, new_buf[(i*8):(i*8)+8])
             val = DESECB.encrypt(xor_data)
-
         return val[:ret_cnt]
 
     def fmcos_3des_mac(self, buf, key, iv=b"\x00\x00\x00\x00\x00\x00\x00\x00", ret_cnt=4):
-        """Compute 3DES CBC-MAC (DES-L, DES-R, DES-L) variant; return first ret_cnt bytes."""
         key_l = key[:8]
         key_r = key[8:]
         DESECB_L = DES.new(key_l, DES.MODE_ECB)
         DESECB_R = DES.new(key_r, DES.MODE_ECB)
 
         val = self.fmcos_des_mac(buf=buf, key=key_l, iv=iv, ret_cnt=8)
+        if self.fmcos_debug:
+            print(f"[{color('=', fg='yellow')}] val1 => {bytes_to_hexstr(val)}\n")
         val = DESECB_R.decrypt(val)
+        if self.fmcos_debug:
+            print(f"[{color('=', fg='yellow')}] val2 => {bytes_to_hexstr(val)}\n")
         val = DESECB_L.encrypt(val)
+        if self.fmcos_debug:
+            print(f"[{color('=', fg='yellow')}] val3 => {bytes_to_hexstr(val)}\n")
 
         return val[:ret_cnt]
 
     def fmcos_packet_mac(self, cla, ins, p1, p2, data, iv, key):
-        """Build MAC for APDU header + optional data as per FMCOS spec."""
-        if key == None:
+        if key is None:
             raise ValueError(f"MAC calculations require a key")
 
         full_mac_data = b""
-        full_mac_data += cla.to_bytes()
-        full_mac_data += ins.to_bytes()
-        full_mac_data += p1.to_bytes()
-        full_mac_data += p2.to_bytes()
-        if data == None:
+        full_mac_data += as_byte(cla)
+        full_mac_data += as_byte(ins)
+        full_mac_data += as_byte(p1)
+        full_mac_data += as_byte(p2)
+        if data is None:
             lc = 4
-            full_mac_data += lc.to_bytes()
+            full_mac_data += as_byte(lc)
         else:
-            full_mac_data += ( (len(data)+4) & 0xff ).to_bytes()   #LC
+            full_mac_data += as_byte((len(data) + 4) & 0xFF)   #LC
             full_mac_data += data
         #Calculate MAC
         if len(key) == 8:
@@ -358,10 +350,9 @@ class FMCOS():
         return ret_mac
 
     def cmd_select(self, fileID=None, name=None):
-        """SELECT by fileID (short File ID) or name (AID)."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
-        if fileID == None and name == None:
+        if fileID is None and name is None:
             raise ValueError("fileID or name cannot be empty")
 
         cla = 0x00
@@ -384,7 +375,6 @@ class FMCOS():
         return ret
 
     def cmd_get_challenge(self, challenge_length=4):
-        """GET CHALLENGE (4 or 8 bytes)."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if challenge_length != 4 and challenge_length != 8:
@@ -397,17 +387,24 @@ class FMCOS():
         ins = 0x84
         p1 = 0
         p2 = 0
-        chlg = self.sendCommand(cla=cla,ins=ins,p1=p1,p2=p2,le=challenge_length)
+        chlg_resp = self.sendCommand(cla=cla,ins=ins,p1=p1,p2=p2,le=challenge_length)
+        sw = chlg_resp[-2:]
+        challenge = chlg_resp[:-2]
+
+        if len(challenge) != challenge_length:
+            raise ValueError(f"Card returned {len(challenge)} bytes, expected {challenge_length}")
+
         if challenge_length == 4:
-            chlg = chlg + b'\x00\x00\x00\x00'
+            challenge = challenge + b'\x00\x00\x00\x00'
+
+        full_response = challenge + sw
 
         if self.fmcos_debug:
-            print(f"[{color('=', fg='yellow')}] GET_CHALLENGE => {bytes_to_hexstr(chlg)}\n")
+            print(f"[{color('=', fg='yellow')}] GET_CHALLENGE => {bytes_to_hexstr(full_response)}\n")
 
-        return chlg
+        return full_response
 
     def cmd_erase_df(self):
-        """ERASE DF command."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x80
@@ -423,7 +420,6 @@ class FMCOS():
         return ret
 
     def cmd_external_authenticate(self, key_id, key=b'\xff\xff\xff\xff\xff\xff\xff\xff'):
-        """EXTERNAL AUTHENTICATE using single/2-key/3-key DES depending on key length."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if len(key) != 8 and len(key) != 16:
@@ -449,7 +445,6 @@ class FMCOS():
         return ret
 
     def cmd_internal_authenticate(self, p1, p2, data):
-        """INTERNAL AUTHENTICATE passthrough."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x00
@@ -461,7 +456,6 @@ class FMCOS():
         return ret
 
     def cmd_create_directory(self, file_id, file_space, create_permissions, erase_permission, app_id, df_name):
-        """CREATE FILE for MF/DF directory objects."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x80
@@ -470,11 +464,11 @@ class FMCOS():
         p2 = file_id & 0xFF
 
         data = b""
-        data += CPUFileType.MFDF.value.to_bytes()
+        data += as_byte(CPUFileType.MFDF.value)
         data += struct.pack(">H", file_space)
-        data += create_permissions.to_bytes()
-        data += erase_permission.to_bytes()
-        data += app_id.to_bytes()
+        data += as_byte(create_permissions)
+        data += as_byte(erase_permission)
+        data += as_byte(app_id)
         data += b"\xff\xff" #Not used parameters
         data += df_name
 
@@ -484,7 +478,6 @@ class FMCOS():
         return ret
 
     def cmd_create_edep(self, balance_type, usage_rights, loop_file_id):
-        """CREATE WALLET (EDEP) for passbook/wallet balances."""
         if self.fmcos_debug: print(f"Calling : {sys._getframe(0).f_code.co_name}({balance_type.name})")
 
         cla = 0x80
@@ -494,11 +487,11 @@ class FMCOS():
         p2 = file_id & 0xFF
 
         data = b""
-        data += CPUFileType.Wallet.value.to_bytes()
+        data += as_byte(CPUFileType.Wallet.value)
         data += b"\x02\x08"
-        data += usage_rights.to_bytes()
+        data += as_byte(usage_rights)
         data += b"\x00\xff"
-        data += loop_file_id.to_bytes()
+        data += as_byte(loop_file_id)
 
         ret = self.sendCommand(cla=cla,ins=ins,p1=p1,p2=p2,Data=data)
         if self.fmcos_debug:
@@ -506,7 +499,6 @@ class FMCOS():
         return ret
 
     def cmd_create_keyfile(self, file_id, file_space, df_sid, key_permission):
-        """CREATE KEYFILE with space and permissions."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x80
@@ -515,10 +507,10 @@ class FMCOS():
         p2 = file_id & 0xFF
 
         data = b""
-        data += CPUFileType.Keyfile.value.to_bytes()
+        data += as_byte(CPUFileType.Keyfile.value)
         data += struct.pack(">H", file_space)
-        data += df_sid.to_bytes()
-        data += key_permission.to_bytes()
+        data += as_byte(df_sid)
+        data += as_byte(key_permission)
         data += b"\xff\xff" #Not used parameters
 
         ret = self.sendCommand(cla=cla,ins=ins,p1=p1,p2=p2,Data=data)
@@ -527,7 +519,6 @@ class FMCOS():
         return ret
 
     def cmd_create_file(self, file_id, file_type, file_size, read_perm, write_perm, access_rights, protection:Protection = None):
-        """CREATE BINARY/RECORD/LOOP files with optional protection flags."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}({file_type.name})")
 
         cla = 0x80
@@ -536,16 +527,16 @@ class FMCOS():
         p2 = file_id & 0xFF
 
         full_file_type = file_type.value
-        if protection != None:
+        if protection is not None:
             full_file_type |= protection.value
 
         data = b""
-        data += full_file_type.to_bytes()
+        data += as_byte(full_file_type)
         data += struct.pack(">H", file_size)
-        data += read_perm.to_bytes()
-        data += write_perm.to_bytes()
+        data += as_byte(read_perm)
+        data += as_byte(write_perm)
         data += b"\xff"
-        data += access_rights.to_bytes()
+        data += as_byte(access_rights)
 
         ret = self.sendCommand(cla=cla,ins=ins,p1=p1,p2=p2,Data=data)
         if self.fmcos_debug:
@@ -554,7 +545,6 @@ class FMCOS():
 
     def cmd_write_key(self, key_add_update, key_id, key_type, usage_rights, key, change_rights=None, key_version=None, algo_id=None, \
                       followup_status=None, error_counter=None, extauth_key=None, protection:Protection = None):
-        """WRITE KEY variants for multiple key types; supports MAC/enc line protection."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}({key_type.name})")
 
         cla = 0x80
@@ -568,50 +558,50 @@ class FMCOS():
 
         full_key_type = key_type.value
         if protection:
-            if extauth_key == None:
+            if extauth_key is None:
                 raise ValueError("extauth_key is required for MAC/encryption")
             full_key_type |= protection.value
             cla |= 0x04
 
         data = b""
-        data += full_key_type.to_bytes()
+        data += as_byte(full_key_type)
 
         match key_type:
             case KeyType.InternalKey | KeyType.OverdrawLimitKey | KeyType.DebitKey | KeyType.PurchaseKey \
                 | KeyType.CreditKey | KeyType.DESEncrypt | KeyType.DESDecrypt | KeyType.DESMAC:
-                if key_version == None or algo_id == None:
-                    raise ValueError(f"Key type {key_type.name} requires key_version and algo_id to be presented")
+                if key_version is None or algo_id is None or change_rights is None:
+                    raise ValueError(f"Key type {key_type.name} requires key_version, algo_id and change_rights to be presented")
 
-                data += usage_rights.to_bytes()
-                data += change_rights.to_bytes()
-                data += key_version.to_bytes()
-                data += algo_id.to_bytes()
+                data += as_byte(usage_rights)
+                data += as_byte(change_rights)
+                data += as_byte(key_version)
+                data += as_byte(algo_id)
                 
             case KeyType.ExternalAuthenticationKey | KeyType.PinKey:
-                if followup_status == None or error_counter == None:
+                if followup_status is None or error_counter is None:
                     raise ValueError(f"Key type {key_type.name} requires followup_status and error_counter to be presented")
 
-                data += usage_rights.to_bytes()
+                data += as_byte(usage_rights)
 
                 if key_type == KeyType.PinKey:
                     data += b"\xef"
                 else:
-                    if change_rights == None:
+                    if change_rights is None:
                         raise ValueError(f"Key type {key_type.name} requires change_rights to be presented")
 
-                    data += change_rights.to_bytes()
+                    data += as_byte(change_rights)
 
-                data += followup_status.to_bytes()
-                data += error_counter.to_bytes()
+                data += as_byte(followup_status)
+                data += as_byte(error_counter)
 
             case KeyType.UnlockPinKey | KeyType.FileLineProtectionKey | KeyType.ChangePinKey:
-                if error_counter == None:
-                    raise ValueError(f"Key type {key_type.name} requires error_counter to be presented")
+                if error_counter is None or change_rights is None:
+                    raise ValueError(f"Key type {key_type.name} requires error_counter, and change_rights to be presented")
 
-                data += usage_rights.to_bytes()
-                data += change_rights.to_bytes()
+                data += as_byte(usage_rights)
+                data += as_byte(change_rights)
                 data += b"\xff"
-                data += error_counter.to_bytes()
+                data += as_byte(error_counter)
 
             case _:
                 raise ValueError(f"Key type not implemented: {key_type}")
@@ -619,7 +609,7 @@ class FMCOS():
         data += key
 
         if protection == Protection.LineProtectEncrypt:
-            data = len(data).to_bytes() + data
+            data = as_byte(len(data)) + data
             data = self.encrypt(data=data, key=extauth_key)
 
         if protection:
@@ -632,7 +622,6 @@ class FMCOS():
         return ret
         
     def _cmd_update_bin_rec(self, ins, p1, p2, data, key=None, protection:Protection = None):
-        """Common helper for UPDATE BINARY/RECORD with optional line protection."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name} ({protection=})")
 
         #Need to account for padding + mac
@@ -641,7 +630,7 @@ class FMCOS():
 
         cla = 0
         if protection:
-            if key == None:
+            if key is None:
                 raise ValueError("key is required for MAC/encryption")
             cla |= 0x04
             le=4
@@ -651,7 +640,7 @@ class FMCOS():
         data_bin += data
 
         if protection == Protection.LineProtectEncrypt:
-            data_bin = len(data_bin).to_bytes() + data_bin
+            data_bin = as_byte(len(data_bin)) + data_bin
             data_bin = self.encrypt(data=data_bin, key=key)
 
         if protection:
@@ -662,7 +651,6 @@ class FMCOS():
         return ret
 
     def cmd_update_binary(self, p1, p2, data, key=None, protection:Protection = None):
-        """UPDATE BINARY wrapper."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         ins = 0xd6
@@ -672,7 +660,6 @@ class FMCOS():
         return ret
 
     def cmd_update_record(self, record_number, file_id, data, key=None, use_tlv=False, protection:Protection = None):
-        """UPDATE RECORD wrapper; can wrap data in a simple TLV (tag 0xF7)."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         ins = 0xdc
@@ -680,7 +667,7 @@ class FMCOS():
         p2 = ( (file_id & 0x1f) << 3 ) | 4
 
         if use_tlv:
-            data = b"\xF7" + len(data).to_bytes() + data
+            data = b"\xF7" + as_byte(len(data)) + data
 
         ret = self._cmd_update_bin_rec(ins=ins, p1=p1, p2=p2, data=data, key=key, protection=protection)
         if self.fmcos_debug:
@@ -688,7 +675,6 @@ class FMCOS():
         return ret
 
     def _cmd_read_bin_rec(self, ins, p1, p2, read_length=1, key=None, protection:Protection = None):
-        """Common helper for READ BINARY/RECORD with optional MAC validation and decrypt."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if read_length > 0xff:
@@ -696,7 +682,7 @@ class FMCOS():
 
         cla = 0x00
         if protection:
-            if key == None:
+            if key is None:
                 raise ValueError("key is required for MAC/encryption")
             cla |= 0x04
 
@@ -731,7 +717,6 @@ class FMCOS():
         return ret
 
     def cmd_read_binary(self, p1, p2, read_length=1, key=None, protection:Protection = None):
-        """READ BINARY wrapper."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         ins = 0xB0
@@ -742,7 +727,6 @@ class FMCOS():
         return ret
 
     def cmd_read_record(self, record_number, file_id, read_length=0, has_tlv=False, key=None, protection:Protection = None):
-        """READ RECORD wrapper; optional TLV unwrapping (tag 0xF7)."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if has_tlv:
@@ -762,11 +746,10 @@ class FMCOS():
         return ret
 
     def cmd_append_record(self, file_id, data, key=None, use_tlv=False, protection:Protection = None):
-        """APPEND RECORD, optionally TLV-wrapped."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if use_tlv:
-            data = b"\xF7" + len(data).to_bytes() + data
+            data = b"\xF7" + as_byte(len(data)) + data
 
         ins = 0xe2
         p1 = 0
@@ -778,7 +761,6 @@ class FMCOS():
         return ret
 
     def cmd_get_balance(self, balance_type):
-        """GET BALANCE for passbook or wallet."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x80
@@ -792,7 +774,6 @@ class FMCOS():
         return ret
 
     def cmd_verify_pin(self, key_id, pin_code):
-        """VERIFY PIN given key slot and PIN bytes."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         cla = 0x00
@@ -807,7 +788,6 @@ class FMCOS():
 
     #Key is a credit or debit key
     def _transfer(self, balance_type, key_id, amount, terminal_id, crde_key, internal_key, transfer_type):
-        """Two-step credit/debit flow with MAC verification and TAC validation."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if self.simulation_status:  #Simulation needs work here
@@ -834,7 +814,7 @@ class FMCOS():
         packed_amount = struct.pack(">I", amount)
 
         data = b""
-        data += key_id.to_bytes()
+        data += as_byte(key_id)
         data += packed_amount
         data += terminal_id
 
@@ -859,7 +839,7 @@ class FMCOS():
         process_key = self.encrypt(data=pk_buffer, key=crde_key)
 
         #Verify MAC_1 (Old Balance)(amount)(balance_type)(terminal_id)
-        mac_verify_buffer = ret[:4] + packed_amount + transaction_type.to_bytes() + terminal_id
+        mac_verify_buffer = ret[:4] + packed_amount + as_byte(transaction_type) + terminal_id
         mac1_calculated = self.fmcos_des_mac(mac_verify_buffer, process_key)
         if self.fmcos_debug:
             print(f"[{color('=', fg='yellow')}] mac_verify_buffer => {bytes_to_hexstr(mac_verify_buffer)}")
@@ -872,7 +852,7 @@ class FMCOS():
         now = datetime.datetime.now()
         transaction_date = bytes.fromhex(now.strftime("%Y%m%d"))
         transaction_time = bytes.fromhex(now.strftime("%H%M%S"))
-        mac2_verify_buffer = packed_amount + transaction_type.to_bytes() + terminal_id + transaction_date + transaction_time
+        mac2_verify_buffer = packed_amount + as_byte(transaction_type) + terminal_id + transaction_date + transaction_time
         mac2_calculated = self.fmcos_des_mac(mac2_verify_buffer, process_key)
 
         if self.fmcos_debug:
@@ -915,42 +895,36 @@ class FMCOS():
         return b"\x90\x00"
 
     def cmd_add_credit(self, balance_type, key_id, amount, terminal_id, credit_key, internal_key):
-        """Add credit to wallet/passbook."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         return self._transfer(balance_type=balance_type, key_id=key_id, amount=amount, terminal_id=terminal_id, \
                             crde_key=credit_key, internal_key=internal_key, transfer_type=0x00)
 
     def cmd_online_transfer(self, key_id, amount, terminal_id, debit_key, internal_key, transaction_serial=None):
-        """Online transfer (debit) to passbook."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         return self._transfer(balance_type=BalanceType.Passbook, key_id=key_id, amount=amount, terminal_id=terminal_id, \
                             crde_key=debit_key, internal_key=internal_key, transfer_type=0x05)
 
     def cmd_cash_withdraw(self, key_id, amount, terminal_id, purchase_key, internal_key, transaction_serial=None):
-        """Cash withdrawal flow using purchase key."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         return self._transaction(balance_type=BalanceType.Passbook, key_id=key_id, amount=amount, terminal_id=terminal_id,\
                                     transaction_type_id=0x04, purchase_key=purchase_key, internal_key=internal_key, transaction_serial=None)
 
     def cmd_purchase_passbook(self, key_id, amount, terminal_id, purchase_key, internal_key, transaction_serial=None):
-        """Purchase using passbook balance."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         return self._transaction(balance_type=BalanceType.Passbook, key_id=key_id, amount=amount, terminal_id=terminal_id,\
                                     transaction_type_id=0x05, purchase_key=purchase_key, internal_key=internal_key, transaction_serial=None)
 
     def cmd_purchase_wallet(self, key_id, amount, terminal_id, purchase_key, internal_key, transaction_serial=None):
-        """Purchase using wallet balance."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         return self._transaction(balance_type=BalanceType.Wallet, key_id=key_id, amount=amount, terminal_id=terminal_id,\
                                     transaction_type_id=0x06, purchase_key=purchase_key, internal_key=internal_key, transaction_serial=None)
 
     def _transaction(self, balance_type:BalanceType, key_id, amount, transaction_type_id, terminal_id, purchase_key, internal_key, transaction_serial=None):
-        """Two-step purchase/cash-withdrawal flow with MACs and TAC validation."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
 
         if self.simulation_status:  #Simulation needs work here
@@ -977,7 +951,7 @@ class FMCOS():
         packed_amount = struct.pack(">I", amount)
 
         data = b""
-        data += key_id.to_bytes()
+        data += as_byte(key_id)
         data += packed_amount
         data += terminal_id
 
@@ -998,7 +972,7 @@ class FMCOS():
         random_1 = ret[11:15]
 
         #Generate a random serial number if one is not supplied
-        if transaction_serial == None:
+        if transaction_serial is None:
             transaction_serial = os.urandom(4)
         else:
             if len(transaction_serial) != 4:
@@ -1019,7 +993,7 @@ class FMCOS():
         transaction_date = bytes.fromhex(now.strftime("%Y%m%d"))
         transaction_time = bytes.fromhex(now.strftime("%H%M%S"))
 
-        mac1_verify_buffer = packed_amount + transaction_type_id.to_bytes() + terminal_id + transaction_date + transaction_time
+        mac1_verify_buffer = packed_amount + as_byte(transaction_type_id) + terminal_id + transaction_date + transaction_time
         mac1_calculated = self.fmcos_des_mac(buf=mac1_verify_buffer, key=process_key)
 
         if self.fmcos_debug:
@@ -1048,7 +1022,7 @@ class FMCOS():
         mac2_card = ret[4:8]
         tac_key = self.data_xor(internal_key[0:8], internal_key[8:])
 
-        tac_verify_buffer = packed_amount + transaction_type_id.to_bytes() + terminal_id + transaction_serial + transaction_date + transaction_time
+        tac_verify_buffer = packed_amount + as_byte(transaction_type_id) + terminal_id + transaction_serial + transaction_date + transaction_time
         tac_calculated = self.fmcos_des_mac(tac_verify_buffer, tac_key)
 
         if self.fmcos_debug:
@@ -1061,7 +1035,6 @@ class FMCOS():
         return b"\x90\x00"
 
     def cmd_update_overdraft_limit(self, key_id, new_overdraft_limit, terminal_id, overdraft_key, internal_key, transaction_serial=None):
-        """Update overdraft limit with MAC verification and TAC validation."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         if len(overdraft_key) != 16:
@@ -1077,7 +1050,7 @@ class FMCOS():
         packed_new_overdraft_limit = struct.pack(">I", new_overdraft_limit)
 
         data = b""
-        data += key_id.to_bytes()
+        data += as_byte(key_id)
         data += terminal_id
 
         cla = 0x80
@@ -1102,7 +1075,7 @@ class FMCOS():
         process_key = self.encrypt(data=pk_buffer, key=overdraft_key)
         process_key = process_key[:8]
 
-        mac1_verify_buffer = old_balance + old_overdraft_limit + transaction_type.to_bytes() + terminal_id
+        mac1_verify_buffer = old_balance + old_overdraft_limit + as_byte(transaction_type) + terminal_id
         mac1_calculated = self.fmcos_des_mac(buf=mac1_verify_buffer, key=process_key)
 
         if self.fmcos_debug:
@@ -1117,7 +1090,7 @@ class FMCOS():
         transaction_date = bytes.fromhex(now.strftime("%Y%m%d"))
         transaction_time = bytes.fromhex(now.strftime("%H%M%S"))
 
-        mac2_verify_buffer = struct.pack(">I", new_overdraft_limit)[1:] + transaction_type.to_bytes() + terminal_id + transaction_date + transaction_time
+        mac2_verify_buffer = struct.pack(">I", new_overdraft_limit)[1:] + as_byte(transaction_type) + terminal_id + transaction_date + transaction_time
         mac2_calculated = self.fmcos_des_mac(buf=mac2_verify_buffer, key=process_key)
 
         data = b""
@@ -1139,11 +1112,11 @@ class FMCOS():
 
         #Calculate & Validate Transaction Verification Code (TAC)
         CARD_TAC = ret[:4]
-
         tac_key = self.data_xor(internal_key[0:8], internal_key[8:])
-        new_balance = struct.unpack(">I", old_balance)[0] + new_overdraft_limit
 
-        tac_verify_buffer = struct.pack(">I", new_balance) + online_transaction_serial + mac2_verify_buffer
+        # The card stores new_limit into the passbook balance field on completion,
+        # so the "new balance" field in the TAC is new_overdraft_limit, not the actual funds balance.
+        tac_verify_buffer = struct.pack(">I", new_overdraft_limit) + online_transaction_serial + mac2_verify_buffer
         tac_calculated = self.fmcos_des_mac(tac_verify_buffer, tac_key)
 
         if self.fmcos_debug:
@@ -1156,7 +1129,6 @@ class FMCOS():
         return b"\x90\x00"
 
     def cmd_card_block(self, line_key):
-        """Block entire card using line-protection MAC."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         cla = 0x84
@@ -1174,7 +1146,6 @@ class FMCOS():
         return ret
 
     def cmd_app_block(self, block_type:ApplicationBlock, line_key):
-        """Block application (temporary or permanent)."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         cla = 0x84
@@ -1192,7 +1163,6 @@ class FMCOS():
         return ret
 
     def cmd_app_unblock(self, line_key):
-        """Unblock application using line-protection MAC."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         cla = 0x84
@@ -1210,7 +1180,6 @@ class FMCOS():
         return ret
 
     def cmd_pin_unblock(self, key_id, pin_code, unlock_pin_key):
-        """Unblock PIN by encrypting new PIN and appending MAC."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         cla = 0x84
@@ -1218,7 +1187,7 @@ class FMCOS():
         p1 = key_id
         p2 = 0
         
-        data = len(pin_code).to_bytes() + pin_code
+        data = as_byte(len(pin_code)) + pin_code
         data = self.encrypt(data=data, key=unlock_pin_key)
         chlg_iv = self.cmd_get_challenge(8)
         data += self.fmcos_packet_mac(cla=cla, ins=ins, p1=p1, p2=p2, data=data, iv=chlg_iv, key=unlock_pin_key)
@@ -1230,7 +1199,6 @@ class FMCOS():
         return ret
 
     def cmd_pin_change(self, key_id, old_pin, new_pin):
-        """Change PIN using old/new PIN with filler 0xFF separator."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         cla = 0x80
@@ -1250,7 +1218,6 @@ class FMCOS():
         return ret
 
     def cmd_pin_reset(self, key_id, new_pin, change_pin_key):
-        """Reset PIN with MAC generated from change-pin key halves xor."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         
         if len(change_pin_key) != 16:
@@ -1275,19 +1242,18 @@ class FMCOS():
         return ret
 
     def sendCommand(self, cla, ins, p1, p2, Data=None, le=None):
-        """Compose and send an APDU via the underlying hardware connection."""
         context = [cla, ins, p1, p2]
-        if Data != None:
+        if Data is not None:
             lc = len(Data)
             context = context + [lc] + list(Data)
         else:
             lc = None
 
-        if le != None:
+        if le is not None:
             context = context + [le]
 
-        if lc == None and le == None:
-            context = context + [0x00]
+        if lc is None and le is None:
+            context.append(0x00)
 
         if self.fmcos_debug:
             print(f"[{color('=', fg='yellow')}] FMCOS => {bytes_to_hexstr(bytes(context))}" )
@@ -1300,7 +1266,6 @@ class FMCOS():
             return recdata
 
     def fmcosGetRecData(self):
-        """Fetch last NFC data and decode status for logs; return raw bytes."""
         nfcdata = self.hw_conn.nfcGetRecData()
 
         if self.fmcos_debug:
@@ -1311,7 +1276,6 @@ class FMCOS():
         return nfcdata
 
     def parse_tlv(self, tlv_data):
-        """Parse and print basic SELECT response TLV tree; return DFName if present."""
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
         SW1_SW2 = tlv_data[-2:]
         answer = tlv_data[:-2]
