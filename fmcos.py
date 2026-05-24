@@ -1114,9 +1114,12 @@ class FMCOS():
         CARD_TAC = ret[:4]
         tac_key = self.data_xor(internal_key[0:8], internal_key[8:])
 
-        # The card stores new_limit into the passbook balance field on completion,
-        # so the "new balance" field in the TAC is new_overdraft_limit, not the actual funds balance.
-        tac_verify_buffer = struct.pack(">I", new_overdraft_limit) + online_transaction_serial + mac2_verify_buffer
+        # The card stores (actual_funds + od_limit) as its balance field.  When the limit
+        # changes, the new stored balance = old_balance + new_limit - old_od_limit.
+        old_balance_int    = struct.unpack(">I", old_balance)[0]
+        old_od_limit_int   = struct.unpack(">I", b'\x00' + old_overdraft_limit)[0]
+        tac_balance        = old_balance_int + new_overdraft_limit - old_od_limit_int
+        tac_verify_buffer  = struct.pack(">I", tac_balance) + online_transaction_serial + mac2_verify_buffer
         tac_calculated = self.fmcos_des_mac(tac_verify_buffer, tac_key)
 
         if self.fmcos_debug:
@@ -1127,6 +1130,64 @@ class FMCOS():
         assert CARD_TAC == tac_calculated, "TAC does not match"
 
         return b"\x90\x00"
+
+    def cmd_get_transaction_history(self, loop_file_id, max_records=10, print_table=True):
+        if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
+
+        tx_type_names = {
+            0x04: "PB cash W/D ",
+            0x05: "PB purchase ",
+            0x06: "WL purchase ",
+            0x07: "OD limit upd",
+            0x09: "Compound pur",
+        }
+
+        records = []
+        for rec_num in range(1, max_records + 1):
+            try:
+                ret = self.cmd_read_record(record_number=rec_num, file_id=loop_file_id, read_length=23)
+            except Exception:
+                break
+
+            if ret[-2:] != b"\x90\x00":
+                break
+
+            data = ret[:-2]
+            if len(data) != 23:
+                break
+
+            serial   = struct.unpack(">H", data[0:2])[0]
+            od_limit = struct.unpack(">I", b'\x00' + data[2:5])[0]
+            amount   = struct.unpack(">I", data[5:9])[0]
+            tx_type  = data[9]
+            terminal = data[10:16]
+            date_hex = data[16:20].hex()
+            time_hex = data[20:23].hex()
+
+            date_fmt = f"{date_hex[0:4]}-{date_hex[4:6]}-{date_hex[6:8]}"
+            time_fmt = f"{time_hex[0:2]}:{time_hex[2:4]}:{time_hex[4:6]}"
+            type_name = tx_type_names.get(tx_type, f"0x{tx_type:02X}        ")
+
+            records.append({
+                "num":      rec_num,
+                "date":     date_fmt,
+                "time":     time_fmt,
+                "type":     type_name,
+                "amount":   amount,
+                "od_limit": od_limit,
+                "serial":   serial,
+                "terminal": terminal.hex(),
+            })
+
+        if print_table:
+            print(f" # | Date       | Time     | Type         | Amount     | OD Limit | Serial | Terminal")
+            print(f"---+------------+----------+--------------+------------+----------+--------+-------------------")
+            for r in records:
+                print(f"{r['num']:2d} | {r['date']} | {r['time']} | {r['type']} | {r['amount']:10d} | {r['od_limit']:8d} | {r['serial']:06X} | {r['terminal']}")
+            count = len(records)
+            print(f"[{color('+', fg='green')}] {count} record{'s' if count != 1 else ''}")
+
+        return records
 
     def cmd_card_block(self, line_key):
         if self.fmcos_debug: print(f"[{color('+', fg='green')}] Calling : {sys._getframe(0).f_code.co_name}")
